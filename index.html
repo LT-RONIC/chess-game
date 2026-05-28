@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Game</title>
+    <link rel="stylesheet" href="https://chessboardjs.com/dist/chessboard-1.0.0.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            max-width: 600px;
+            width: 90%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 28px;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+        }
+
+        label {
+            color: #555;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        select, button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        select {
+            background-color: #f0f0f0;
+            color: #333;
+            border: 2px solid #ddd;
+        }
+
+        select:hover {
+            border-color: #667eea;
+        }
+
+        button {
+            background-color: #667eea;
+            color: white;
+        }
+
+        button:hover {
+            background-color: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .board-container {
+            margin: 30px 0;
+            display: flex;
+            justify-content: center;
+        }
+
+        #board {
+            width: 400px;
+            max-width: 100%;
+        }
+
+        .status {
+            color: #333;
+            font-size: 16px;
+            font-weight: 600;
+            margin: 20px 0;
+            height: 24px;
+        }
+
+        .status.game-over {
+            color: #d32f2f;
+            font-size: 18px;
+        }
+
+        .status.thinking {
+            color: #667eea;
+            font-style: italic;
+        }
+
+        .fen-display {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #555;
+            max-height: 60px;
+            overflow-y: auto;
+        }
+
+        .analysis-controls {
+            display: none;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        .analysis-controls.show {
+            display: flex;
+        }
+
+        .move-counter {
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>♟️ Chess Game ♟️</h1>
+        
+        <div class="controls">
+            <label for="difficulty">Difficulty:</label>
+            <select id="difficulty">
+                <option value="400">400 Elo (Random)</option>
+                <option value="900" selected>900 Elo (Medium)</option>
+                <option value="1200">1200 Elo (Hard)</option>
+            </select>
+            <button id="resetBtn">New Game</button>
+            <button id="analyzeBtn" style="display: none;">Analyze Game</button>
+            <button id="exitAnalysisBtn" style="display: none;">Exit Analysis</button>
+        </div>
+
+        <div class="status" id="status"></div>
+
+        <div class="board-container">
+            <div id="board"></div>
+        </div>
+
+        <div class="fen-display" id="fenDisplay"></div>
+
+        <div class="move-counter">
+            <span id="moveCounter">Moves: 0</span>
+        </div>
+
+        <div class="analysis-controls" id="analysisControls">
+            <button id="prevMoveBtn">← Previous</button>
+            <span id="analysisStatus"></span>
+            <button id="nextMoveBtn">→ Next</button>
+        </div>
+    </div>
+
+    <script src="https://chessboardjs.com/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chess.js@0.10.3/dist/chess.min.js"></script>
+
+    <script>
+        // Game variables
+        let game = new Chess();
+        let board = null;
+        let gameOver = false;
+        let fenHistory = [game.fen()];
+        let isAnalysisMode = false;
+        let currentAnalysisIndex = 0;
+        let difficulty = '900';
+        let aiThinking = false;
+
+        // Piece values for evaluation
+        const pieceValues = {
+            'p': 1,
+            'n': 3,
+            'b': 3,
+            'r': 5,
+            'q': 9,
+            'k': 0
+        };
+
+        // Initialize board
+        function initBoard() {
+            const cfg = {
+                draggable: true,
+                position: 'start',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            };
+            board = ChessBoard('board', cfg);
+            game = new Chess();
+            fenHistory = [game.fen()];
+            currentAnalysisIndex = 0;
+            gameOver = false;
+            aiThinking = false;
+            isAnalysisMode = false;
+            updateUI();
+        }
+
+        function onDragStart(source, piece, position, orientation) {
+            if (gameOver || isAnalysisMode) return false;
+            if (aiThinking) return false;
+            if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+                (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
+            return true;
+        }
+
+        function onDrop(source, target) {
+            if (gameOver || isAnalysisMode || aiThinking) return 'snapback';
+
+            const move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q'
+            });
+
+            if (move === null) return 'snapback';
+
+            fenHistory.push(game.fen());
+            updateUI();
+
+            if (game.game_over()) {
+                endGame();
+            } else {
+                aiThinking = true;
+                setTimeout(makeAIMove, 500);
+            }
+        }
+
+        function onSnapEnd() {
+            board.position(game.fen());
+        }
+
+        function makeAIMove() {
+            if (gameOver || game.turn() === 'w') {
+                aiThinking = false;
+                return;
+            }
+
+            let bestMove;
+
+            if (difficulty === '400') {
+                bestMove = getRandomMove();
+            } else if (difficulty === '900') {
+                bestMove = getBestMove(2);
+            } else {
+                bestMove = getBestMove(3);
+            }
+
+            if (bestMove) {
+                game.move(bestMove);
+                fenHistory.push(game.fen());
+                board.position(game.fen());
+                updateUI();
+
+                if (game.game_over()) {
+                    endGame();
+                }
+            }
+
+            aiThinking = false;
+        }
+
+        function getRandomMove() {
+            const moves = game.moves();
+            return moves[Math.floor(Math.random() * moves.length)] || null;
+        }
+
+        function getBestMove(depth) {
+            let bestMove = null;
+            let bestValue = -Infinity;
+
+            const moves = game.moves({ verbose: true });
+
+            for (const move of moves) {
+                game.move(move);
+                const value = minimax(depth - 1, false);
+                game.undo();
+
+                if (value > bestValue) {
+                    bestValue = value;
+                    bestMove = move;
+                }
+            }
+
+            return bestMove;
+        }
+
+        function minimax(depth, isMaximizing) {
+            if (depth === 0 || game.game_over()) {
+                return evaluateBoard();
+            }
+
+            const moves = game.moves({ verbose: true });
+
+            if (isMaximizing) {
+                let maxEval = -Infinity;
+                for (const move of moves) {
+                    game.move(move);
+                    const evalScore = minimax(depth - 1, false);
+                    game.undo();
+                    maxEval = Math.max(maxEval, evalScore);
+                }
+                return maxEval;
+            } else {
+                let minEval = Infinity;
+                for (const move of moves) {
+                    game.move(move);
+                    const evalScore = minimax(depth - 1, true);
+                    game.undo();
+                    minEval = Math.min(minEval, evalScore);
+                }
+                return minEval;
+            }
+        }
+
+        function evaluateBoard() {
+            const board = game.board();
+            let whiteScore = 0;
+            let blackScore = 0;
+
+            for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                    const piece = board[i][j];
+                    if (piece) {
+                        const value = pieceValues[piece.type] || 0;
+                        if (piece.color === 'w') {
+                            whiteScore += value;
+                        } else {
+                            blackScore += value;
+                        }
+                    }
+                }
+            }
+
+            let score = blackScore - whiteScore;
+
+            if (game.in_checkmate()) {
+                score += game.turn() === 'b' ? -1000 : 1000;
+            } else if (game.in_check()) {
+                score += game.turn() === 'b' ? -50 : 50;
+            }
+
+            return score;
+        }
+
+        function endGame() {
+            gameOver = true;
+            let result = '';
+
+            if (game.in_checkmate()) {
+                result = game.turn() === 'w' ? 'Black wins by checkmate!' : 'White wins by checkmate!';
+            } else if (game.in_draw()) {
+                if (game.in_stalemate()) {
+                    result = 'Draw by stalemate';
+                } else if (game.insufficient_material()) {
+                    result = 'Draw by insufficient material';
+                } else if (game.in_threefold_repetition()) {
+                    result = 'Draw by repetition';
+                } else {
+                    result = 'Draw by 50-move rule';
+                }
+            }
+
+            document.getElementById('status').textContent = result;
+            document.getElementById('status').classList.add('game-over');
+            document.getElementById('analyzeBtn').style.display = 'inline-block';
+        }
+
+        function updateUI() {
+            const status = document.getElementById('status');
+            
+            if (aiThinking) {
+                status.textContent = 'Black is thinking...';
+                status.classList.remove('game-over');
+                status.classList.add('thinking');
+            } else {
+                status.classList.remove('thinking');
+                const turn = game.turn() === 'w' ? 'White' : 'Black';
+                if (game.in_check()) {
+                    status.textContent = `${turn} in check`;
+                } else {
+                    status.textContent = `${turn} to move`;
+                }
+            }
+
+            document.getElementById('fenDisplay').textContent = game.fen();
+            
+            const moveCount = (fenHistory.length - 1);
+            document.getElementById('moveCounter').textContent = `Moves: ${moveCount}`;
+        }
+
+        function resetGame() {
+            document.getElementById('analyzeBtn').style.display = 'none';
+            document.getElementById('exitAnalysisBtn').style.display = 'none';
+            document.getElementById('analysisControls').classList.remove('show');
+            isAnalysisMode = false;
+            initBoard();
+        }
+
+        function enterAnalysisMode() {
+            isAnalysisMode = true;
+            currentAnalysisIndex = fenHistory.length - 1;
+            document.getElementById('analyzeBtn').style.display = 'none';
+            document.getElementById('exitAnalysisBtn').style.display = 'inline-block';
+            document.getElementById('analysisControls').classList.add('show');
+            document.getElementById('difficulty').disabled = true;
+            updateAnalysisDisplay();
+        }
+
+        function exitAnalysisMode() {
+            isAnalysisMode = false;
+            document.getElementById('exitAnalysisBtn').style.display = 'none';
+            document.getElementById('analysisControls').classList.remove('show');
+            document.getElementById('difficulty').disabled = false;
+            board.position(fenHistory[fenHistory.length - 1]);
+            updateUI();
+        }
+
+        function previousMove() {
+            if (currentAnalysisIndex > 0) {
+                currentAnalysisIndex--;
+                updateAnalysisDisplay();
+            }
+        }
+
+        function nextMove() {
+            if (currentAnalysisIndex < fenHistory.length - 1) {
+                currentAnalysisIndex++;
+                updateAnalysisDisplay();
+            }
+        }
+
+        function updateAnalysisDisplay() {
+            const fen = fenHistory[currentAnalysisIndex];
+            board.position(fen);
+            
+            const moveNum = currentAnalysisIndex;
+            const totalMoves = fenHistory.length - 1;
+            document.getElementById('analysisStatus').textContent = `Move ${moveNum} / ${totalMoves}`;
+            
+            document.getElementById('prevMoveBtn').disabled = currentAnalysisIndex === 0;
+            document.getElementById('nextMoveBtn').disabled = currentAnalysisIndex === fenHistory.length - 1;
+        }
+
+        // Event listeners
+        document.getElementById('resetBtn').addEventListener('click', resetGame);
+        document.getElementById('analyzeBtn').addEventListener('click', enterAnalysisMode);
+        document.getElementById('exitAnalysisBtn').addEventListener('click', exitAnalysisMode);
+        document.getElementById('prevMoveBtn').addEventListener('click', previousMove);
+        document.getElementById('nextMoveBtn').addEventListener('click', nextMove);
+
+        document.getElementById('difficulty').addEventListener('change', (e) => {
+            difficulty = e.target.value;
+        });
+
+        // Initialize game on load
+        window.addEventListener('load', () => {
+            initBoard();
+        });
+    </script>
+</body>
+</html>
