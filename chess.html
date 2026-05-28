@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Chess with Bot & Analysis</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 50px;
+        }
+        h1 { margin-bottom: 10px; }
+        #board { width: 400px; margin: 20px 0; }
+        .controls { margin-bottom: 15px; }
+        select, button {
+            padding: 10px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 5px;
+            border: none;
+        }
+        button { background-color: #3498db; color: white; font-weight: bold; }
+        button:hover { background-color: #2980b9; }
+        #status { font-size: 20px; font-weight: bold; margin-bottom: 15px; color: #f1c40f; }
+        #analysis-controls { display: none; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+    <h1>Play Chess</h1>
+    
+    <div class="controls" id="game-controls">
+        <label for="difficulty">Bot Level: </label>
+        <select id="difficulty">
+            <option value="400">Level 400 (Beginner)</option>
+            <option value="900">Level 900 (Intermediate)</option>
+            <option value="1200" selected>Level 1200 (Advanced)</option>
+        </select>
+        <button onclick="resetGame()">New Game</button>
+    </div>
+
+    <div id="status">White to move</div>
+    <div id="board"></div>
+
+    <div id="analysis-controls">
+        <button onclick="prevMove()">⬅ Previous Move</button>
+        <button onclick="nextMove()">Next Move ➡</button>
+        <br><br>
+        <button onclick="resetGame()">Exit Analysis & Play New Game</button>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
+    <script>
+        var board = null;
+        var game = new Chess();
+        var isAnalysisMode = false;
+        
+        // We save the board state (FEN) after every move for analysis later
+        var fenHistory = [];
+        var currentFenIndex = 0;
+
+        // Piece values for the AI to "evaluate" the board
+        var pieceValues = { 'p': 10, 'n': 30, 'b': 30, 'r': 50, 'q': 90, 'k': 900 };
+
+        // --- GAME LOGIC & UI ---
+
+        function updateStatus() {
+            var statusStr = '';
+            var moveColor = (game.turn() === 'w') ? 'White' : 'Black';
+
+            if (game.in_checkmate()) {
+                statusStr = 'Game over, ' + moveColor + ' is in checkmate.';
+                showAnalysisControls();
+            } else if (game.in_draw()) {
+                statusStr = 'Game over, drawn position';
+                showAnalysisControls();
+            } else {
+                statusStr = moveColor + ' to move';
+                if (game.in_check()) statusStr += ', ' + moveColor + ' is in check';
+            }
+            $('#status').text(statusStr);
+        }
+
+        // Triggered when a player drags and drops a piece
+        function onDrop(source, target) {
+            if (isAnalysisMode) return 'snapback'; // No moving pieces in analysis
+
+            var move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' // Always promote to queen for simplicity
+            });
+
+            // Illegal move check
+            if (move === null) return 'snapback';
+
+            fenHistory.push(game.fen());
+            updateStatus();
+
+            // Make the bot move after a short delay so it feels natural
+            window.setTimeout(makeBotMove, 250);
+        }
+
+        function onSnapEnd() {
+            board.position(game.fen());
+        }
+
+        // --- BOT AI (MINIMAX ALGORITHM) ---
+
+        function evaluateBoard(game) {
+            var totalEvaluation = 0;
+            var currentBoard = game.board();
+            for (var i = 0; i < 8; i++) {
+                for (var j = 0; j < 8; j++) {
+                    if (currentBoard[i][j]) {
+                        var val = pieceValues[currentBoard[i][j].type];
+                        // White is positive, Black is negative
+                        totalEvaluation += (currentBoard[i][j].color === 'w') ? val : -val;
+                    }
+                }
+            }
+            return totalEvaluation;
+        }
+
+        function minimax(game, depth, alpha, beta, isMaximizingPlayer) {
+            if (depth === 0 || game.game_over()) {
+                return evaluateBoard(game);
+            }
+
+            var moves = game.moves();
+
+            if (isMaximizingPlayer) {
+                var bestVal = -9999;
+                for (var i = 0; i < moves.length; i++) {
+                    game.move(moves[i]);
+                    bestVal = Math.max(bestVal, minimax(game, depth - 1, alpha, beta, !isMaximizingPlayer));
+                    game.undo();
+                    alpha = Math.max(alpha, bestVal);
+                    if (beta <= alpha) break; // Alpha-beta pruning
+                }
+                return bestVal;
+            } else {
+                var bestVal = 9999;
+                for (var i = 0; i < moves.length; i++) {
+                    game.move(moves[i]);
+                    bestVal = Math.min(bestVal, minimax(game, depth - 1, alpha, beta, !isMaximizingPlayer));
+                    game.undo();
+                    beta = Math.min(beta, bestVal);
+                    if (beta <= alpha) break; // Alpha-beta pruning
+                }
+                return bestVal;
+            }
+        }
+
+        function makeBotMove() {
+            if (game.game_over()) return;
+
+            var level = parseInt($('#difficulty').val());
+            var moves = game.moves();
+            var bestMove = null;
+
+            if (level === 400) {
+                // Level 400: Random move
+                bestMove = moves[Math.floor(Math.random() * moves.length)];
+            } else {
+                // Level 900 (Depth 2) or 1200 (Depth 3)
+                var depth = (level === 900) ? 2 : 3;
+                var bestVal = 9999; // Bot plays Black, wants lowest score possible
+
+                for (var i = 0; i < moves.length; i++) {
+                    game.move(moves[i]);
+                    // Bot just moved, next turn is White (maximizing player)
+                    var boardVal = minimax(game, depth - 1, -10000, 10000, true);
+                    game.undo();
+
+                    if (boardVal < bestVal) {
+                        bestVal = boardVal;
+                        bestMove = moves[i];
+                    }
+                }
+                // Fallback to random if something prevents finding a move
+                if (!bestMove) bestMove = moves[Math.floor(Math.random() * moves.length)];
+            }
+
+            game.move(bestMove);
+            board.position(game.fen());
+            fenHistory.push(game.fen());
+            updateStatus();
+        }
+
+        // --- ANALYSIS MODE ---
+
+        function showAnalysisControls() {
+            isAnalysisMode = true;
+            currentFenIndex = fenHistory.length - 1;
+            $('#game-controls').hide();
+            $('#analysis-controls').show();
+        }
+
+        function prevMove() {
+            if (currentFenIndex > 0) {
+                currentFenIndex--;
+                board.position(fenHistory[currentFenIndex]);
+            }
+        }
+
+        function nextMove() {
+            if (currentFenIndex < fenHistory.length - 1) {
+                currentFenIndex++;
+                board.position(fenHistory[currentFenIndex]);
+            }
+        }
+
+        // --- INITIALIZATION ---
+
+        function resetGame() {
+            game.reset();
+            fenHistory = [game.fen()];
+            isAnalysisMode = false;
+            $('#game-controls').show();
+            $('#analysis-controls').hide();
+            board.start();
+            updateStatus();
+        }
+
+        var config = {
+            draggable: true,
+            position: 'start',
+            onDrop: onDrop,
+            onSnapEnd: onSnapEnd
+        };
+        
+        board = Chessboard('board', config);
+        fenHistory.push(game.fen()); // Record starting position
+        updateStatus();
+
+    </script>
+</body>
+</html>
